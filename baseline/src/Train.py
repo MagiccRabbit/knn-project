@@ -2,6 +2,7 @@ import BatchGenerator
 import AudioAugment
 import FeatureExtractor
 import EmbeddingModel
+from eval_metrics import eer_metric, minDCF_metric
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
@@ -162,6 +163,25 @@ for step in range(0, ITER_NUM):
         log["same_spk_similarity"].append(mean_same)
         log["different_spk_similarity"].append(mean_diff)
         log["margin"].append(margin)
+
+    # Metrics
+    # TODO otestovat
+
+    #if step == ITER_NUM - 1:
+    #    spk_emb_dict = defaultdict(list)
+    #    for emb, spk in zip(embeddings, labels):
+    #        spk_emb_dict[spk.item()].append(emb)
+    #    same_sims = compute_same_sims(spk_emb_dict, pairs_per_spk=3)
+    #    diff_sims = compute_diff_sims(
+    #        spk_emb_dict,
+    #        target_pairs=len(same_sims)
+    #    )
+    #    scores = same_sims + diff_sims
+    #    labels = [1]*len(same_sims) + [0]*len(diff_sims)
+    #    eer, _ = eer_metric(scores, labels)
+    #    min_dcf, _ = minDCF_metric(scores, labels)
+    
+
 
 log["loss_history_EMA"] = pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
 
