@@ -1,84 +1,55 @@
-import BatchGenerator
-import AudioAugment
-import FeatureExtractor
-import EmbeddingModel
-from eval_metrics import eer_metric, minDCF_metric
 import torch
 import torch.nn as nn
-from torch.optim import AdamW
-from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
-from collections import defaultdict
 import torch.nn.functional as F
 import numpy as np
+from . import BatchGenerator, AudioAugment, FeatureExtractor, EmbeddingModel
+from .eval_metrics import eer_metric, minDCF_metric
+from torch.optim import AdamW
+from pathlib import Path
+from collections import defaultdict
 
 
-batch_generator = BatchGenerator.BatchGenerator("../Data/subset_100_spks")
-#augment = AudioAugment.AudioAugment()
-feature_extractor = FeatureExtractor.FeatureExtractor()
-embed_model = EmbeddingModel.EmbeddingModel()
-criterion = nn.CrossEntropyLoss()
-
-optimizer = AdamW(embed_model.parameters(), lr=2e-5, weight_decay=0.01)
-
-ITER_NUM = 1000
+ITER_NUM = 500
 EVAL_INTERVAL = 5
+SAVE_INTERVAL = 50
+SPEAKER_LIMIT = 100
 
 MODEL_DIR = "model"
-MODEL_NAME = "checkpoint_"+str(ITER_NUM)
+MODEL_NAME = "checkpoint_" + str(ITER_NUM)
 
-model_dir = Path(MODEL_DIR)
-model_dir.mkdir(parents=True, exist_ok=True)
-
-model_path = Path(MODEL_DIR+"/"+MODEL_NAME+".pt")
-if model_path.exists():
-    checkpoint = torch.load(model_path, weights_only=False)
-    embed_model.load_state_dict(checkpoint["model"])
-    optimizer.load_state_dict(checkpoint["optimizer"])
-    old_log = checkpoint["log"]
-else:
-    optimizer = AdamW(embed_model.parameters(), lr=2e-5, weight_decay=0.01)
-
-log = {
-    "loss_history" : [],
-    "grad_norm_history" : [],
-    "loss_history_EMA" : [],
-    "same_spk_similarity": [],
-    "different_spk_similarity" : [],
-    "margin" : []
-}
 
 def show_and_save_figs(log):
     plt.figure(figsize=(10, 5))
-    plt.plot(torch.tensor(log["loss_history"]), label='Trénovací loss')
-    plt.title('Loss')
-    plt.xlabel('Iterace')
-    plt.ylabel('Loss hodnota')
+    plt.plot(log["loss_history"], label="Trénovací loss")
+    plt.title("Loss")
+    plt.xlabel("Iterace")
+    plt.ylabel("Loss hodnota")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR+"/"+MODEL_NAME+"_loss.png") 
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_loss.png")
     plt.show()
 
     plt.figure(figsize=(10, 5))
-    plt.plot(torch.tensor(log["loss_history_EMA"]), label='EMA')
-    plt.title('EMA')
-    plt.xlabel('Iterace')
-    plt.ylabel('EMA loss hodnoty')
+    plt.plot(log["loss_history_EMA"], label="EMA")
+    plt.title("EMA")
+    plt.xlabel("Iterace")
+    plt.ylabel("EMA loss hodnoty")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR+"/"+MODEL_NAME+"_EMA.png") 
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_EMA.png")
     plt.show()
 
     plt.figure(figsize=(10, 5))
-    plt.plot(torch.tensor(log["grad_norm_history"]), label='Gradient norm')
-    plt.title('Gradient norm')
-    plt.xlabel('Iterace')
-    plt.ylabel('Loss hodnota')
+    plt.plot(log["grad_norm_history"], label="Gradient norm")
+    plt.title("Gradient norm")
+    plt.xlabel("Iterace")
+    plt.ylabel("Loss hodnota")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR+"/"+MODEL_NAME+"_grad-norm.png") 
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_grad-norm.png")
     plt.show()
 
     plt.plot(log["same_spk_similarity"], label="same")
@@ -87,10 +58,9 @@ def show_and_save_figs(log):
     plt.legend()
     plt.xlabel("step")
     plt.ylabel("similarity")
-    plt.savefig(MODEL_DIR+"/"+MODEL_NAME+"_margin.png") 
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_margin.png")
     plt.show()
 
-show_and_save_figs(old_log)
 
 def compute_grad_norm(model):
     total_norm = 0.0
@@ -100,7 +70,8 @@ def compute_grad_norm(model):
             param_norm = p.grad.data.norm(2)
             total_norm += param_norm.item() ** 2
 
-    return total_norm ** 0.5
+    return total_norm**0.5
+
 
 def compute_same_sims(spk_emb_dict, pairs_per_spk=3):
     same_sims = []
@@ -108,7 +79,7 @@ def compute_same_sims(spk_emb_dict, pairs_per_spk=3):
     for spk, embs in spk_emb_dict.items():
         if len(embs) < 2:
             continue
-        
+
         for _ in range(pairs_per_spk):
             emb_a, emb_b = random.sample(embs, 2)
             sim = F.cosine_similarity(emb_a, emb_b, dim=0)
@@ -132,65 +103,138 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
     return diff_sims
 
-for step in range(0, ITER_NUM):
-    batch, labels = batch_generator.generate_random_speaker_balanced_batch()
-    batch = torch.stack([feature_extractor.get_features(b) for b in batch])
-    #batch = batch.float
-    labels = torch.tensor(labels)
-    embeddings, logits = embed_model.forward(batch)
 
-    loss = criterion(logits, labels)
-    optimizer.zero_grad()
-    loss.backward()
-    log["grad_norm_history"].append(compute_grad_norm(embed_model))
-    optimizer.step()
+class EmbeddingModelTrainer:
+    def __init__(self, dev_dataset_dir, test_dataset_dir):
+        self.dev_batch_generator = BatchGenerator.BatchGenerator(dev_dataset_dir, max_unique=SPEAKER_LIMIT)
+        self.test_batch_generator = BatchGenerator.BatchGenerator(test_dataset_dir, max_unique=None)
+        # augment = AudioAugment.AudioAugment()
+        self.feature_extractor = FeatureExtractor.FeatureExtractor()
+        self.embed_model = EmbeddingModel.EmbeddingModel(
+            num_speakers=self.dev_batch_generator.total_unique_speakers
+        )
+        self.criterion = nn.CrossEntropyLoss()
+        self.optimizer = AdamW(
+            self.embed_model.parameters(), lr=2e-5, weight_decay=0.01
+        )
+        
+        self.log = {
+            "loss_history": [],
+            "grad_norm_history": [],
+            "loss_history_EMA": [],
+            "same_spk_similarity": [],
+            "different_spk_similarity": [],
+            "margin": [],
+        }
 
-    log["loss_history"].append(loss)
-    print("Iterace č. "+str(step)+": "+str(loss))
+        # load model if exists
+        model_dir = (
+            Path(__file__).resolve().parent.parent.joinpath(MODEL_DIR) # baseline/MODEL_DIR/
+        )  
+        model_dir.mkdir(parents=True, exist_ok=True)
 
-    if step % EVAL_INTERVAL == 0:
+        self.model_path = model_dir.joinpath(f"{MODEL_NAME}.pt")
+        self.last_step = -1
+        if self.model_path.exists():
+            checkpoint = torch.load(self.model_path, weights_only=False)
+            self.embed_model.load_state_dict(checkpoint["model"])
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+            self.log = checkpoint["log"]
+            self.last_step = checkpoint["step"]
+            self.dev_batch_generator.set_speaker_paths(checkpoint["speaker_paths"])
+
+            #show_and_save_figs(old_log)
+
+    def get_batch(self, batch_generator):
+        batch, labels = batch_generator.generate_random_speaker_balanced_batch()
+        batch = torch.stack([self.feature_extractor.get_features(b) for b in batch])
+        # batch = batch.float
+        labels = torch.tensor(labels)
+
+        return batch, labels
+
+    def evaluate_pairs(self, embeddings, labels):
         spk_emb_dict = defaultdict(list)
         for emb, spk in zip(embeddings, labels):
             spk_emb_dict[spk.item()].append(emb)
         same_sims = compute_same_sims(spk_emb_dict, pairs_per_spk=3)
-        diff_sims = compute_diff_sims(
-            spk_emb_dict,
-            target_pairs=len(same_sims)
+        diff_sims = compute_diff_sims(spk_emb_dict, target_pairs=len(same_sims))
+
+        return same_sims, diff_sims
+    
+    def save_checkpoint(self, step, log):
+        torch.save(
+            {
+                "model": self.embed_model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "step": step,
+                "log": log,
+                "speaker_paths": self.dev_batch_generator.speaker_paths
+            },
+            self.model_path,
         )
-        mean_same = np.mean(same_sims)
-        mean_diff = np.mean(diff_sims)
-        margin = mean_same - mean_diff
-        log["same_spk_similarity"].append(mean_same)
-        log["different_spk_similarity"].append(mean_diff)
-        log["margin"].append(margin)
+
+    def train(self):
+        embed_model = self.embed_model
+        optimizer = self.optimizer
+        criterion = self.criterion
+        log = self.log
+
+        for step in range(self.last_step + 1, ITER_NUM):
+            batch, labels = self.get_batch(self.dev_batch_generator)
+            embeddings, logits = embed_model.forward(batch)
+
+            loss = criterion(logits, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            log["grad_norm_history"].append(compute_grad_norm(embed_model))
+            optimizer.step()
+
+            log["loss_history"].append(loss.item())
+            print(f"Iterace č. {step + 1}/{ITER_NUM}, loss: {loss.item()}")
+
+            if step % EVAL_INTERVAL == 0:
+                same_sims, diff_sims = self.evaluate_pairs(embeddings, labels)
+                mean_same = np.mean(same_sims)
+                mean_diff = np.mean(diff_sims)
+                margin = mean_same - mean_diff
+                log["same_spk_similarity"].append(mean_same)
+                log["different_spk_similarity"].append(mean_diff)
+                log["margin"].append(margin)
+                
+            if step % SAVE_INTERVAL == 0 or step == ITER_NUM - 1:
+                self.save_checkpoint(step, log)
+                       
+
+        log["loss_history_EMA"] = (
+            pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
+        )
+
+        show_and_save_figs(log)
+
+        return embed_model
 
     # Metrics
-    # TODO otestovat
+    def evaluate(self):
+        # TODO otestovat
+        self.test_batch_generator.speakers_num = (
+            self.test_batch_generator.total_unique_speakers
+        )  # use all speakers in test part
 
-    #if step == ITER_NUM - 1:
-    #    spk_emb_dict = defaultdict(list)
-    #    for emb, spk in zip(embeddings, labels):
-    #        spk_emb_dict[spk.item()].append(emb)
-    #    same_sims = compute_same_sims(spk_emb_dict, pairs_per_spk=3)
-    #    diff_sims = compute_diff_sims(
-    #        spk_emb_dict,
-    #        target_pairs=len(same_sims)
-    #    )
-    #    scores = same_sims + diff_sims
-    #    labels = [1]*len(same_sims) + [0]*len(diff_sims)
-    #    eer, _ = eer_metric(scores, labels)
-    #    min_dcf, _ = minDCF_metric(scores, labels)
-    
+        self.embed_model.eval()  # Set to evaluation mode and disable gradient calculation
+        with torch.no_grad():
+            batch, labels = self.get_batch(self.test_batch_generator)
 
+            embeddings, logits = self.embed_model.forward(batch)
+            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels)
 
-log["loss_history_EMA"] = pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
+        scores = same_sims + diff_sims
+        labels = [1] * len(same_sims) + [0] * len(diff_sims)
+        eer, eer_threshold = eer_metric(scores, labels)
+        min_dcf, dcf_threshold = minDCF_metric(scores, labels)
 
-torch.save({
-    "model": embed_model.state_dict(),
-    "optimizer": optimizer.state_dict(),
-    "step" : step,
-    "log" : log
-}, model_path)
+        print("Evaluation")
+        print(f"Test EER: {eer*100:.2f}% (at threshold: {eer_threshold:.4f})")
+        print(f"Test Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
 
-
-    
+        self.embed_model.train()
