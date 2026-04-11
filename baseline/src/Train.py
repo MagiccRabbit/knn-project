@@ -52,6 +52,7 @@ def show_and_save_figs(log):
     plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_grad-norm.png")
     plt.show()
 
+    plt.figure(figsize=(10, 5))
     plt.plot(log["same_spk_similarity"], label="same")
     plt.plot(log["different_spk_similarity"], label="diff")
     plt.plot(log["margin"], label="margin")
