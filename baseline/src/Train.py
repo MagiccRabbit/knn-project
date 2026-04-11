@@ -12,10 +12,10 @@ from pathlib import Path
 from collections import defaultdict
 
 
-ITER_NUM = 500
+ITER_NUM = 1000
 EVAL_INTERVAL = 5
 SAVE_INTERVAL = 50
-SPEAKER_LIMIT = 100
+SPEAKER_LIMIT = 100 # None for no limit
 
 MODEL_DIR = "model"
 MODEL_NAME = "checkpoint_" + str(ITER_NUM)
