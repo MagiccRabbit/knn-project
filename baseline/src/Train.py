@@ -15,7 +15,7 @@ from collections import defaultdict
 ITER_NUM = 1000
 EVAL_INTERVAL = 5
 SAVE_INTERVAL = 50
-SPEAKER_LIMIT = 100 # None for no limit
+SPEAKER_LIMIT = 100  # None for no limit
 
 MODEL_DIR = "model"
 MODEL_NAME = "checkpoint_" + str(ITER_NUM)
@@ -106,8 +106,12 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
 class EmbeddingModelTrainer:
     def __init__(self, dev_dataset_dir, test_dataset_dir):
-        self.dev_batch_generator = BatchGenerator.BatchGenerator(dev_dataset_dir, max_unique=SPEAKER_LIMIT)
-        self.test_batch_generator = BatchGenerator.BatchGenerator(test_dataset_dir, max_unique=None)
+        self.dev_batch_generator = BatchGenerator.BatchGenerator(
+            dev_dataset_dir, max_unique=SPEAKER_LIMIT
+        )
+        self.test_batch_generator = BatchGenerator.BatchGenerator(
+            test_dataset_dir, max_unique=None
+        )
         # augment = AudioAugment.AudioAugment()
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
         self.embed_model = EmbeddingModel.EmbeddingModel(
@@ -117,7 +121,7 @@ class EmbeddingModelTrainer:
         self.optimizer = AdamW(
             self.embed_model.parameters(), lr=2e-5, weight_decay=0.01
         )
-        
+
         self.log = {
             "loss_history": [],
             "grad_norm_history": [],
@@ -129,8 +133,10 @@ class EmbeddingModelTrainer:
 
         # load model if exists
         model_dir = (
-            Path(__file__).resolve().parent.parent.joinpath(MODEL_DIR) # baseline/MODEL_DIR/
-        )  
+            Path(__file__)
+            .resolve()
+            .parent.parent.joinpath(MODEL_DIR)  # baseline/MODEL_DIR/
+        )
         model_dir.mkdir(parents=True, exist_ok=True)
 
         self.model_path = model_dir.joinpath(f"{MODEL_NAME}.pt")
@@ -143,7 +149,7 @@ class EmbeddingModelTrainer:
             self.last_step = checkpoint["step"]
             self.dev_batch_generator.set_speaker_paths(checkpoint["speaker_paths"])
 
-            #show_and_save_figs(old_log)
+            # show_and_save_figs(old_log)
 
     def get_batch(self, batch_generator):
         batch, labels = batch_generator.generate_random_speaker_balanced_batch()
@@ -161,7 +167,7 @@ class EmbeddingModelTrainer:
         diff_sims = compute_diff_sims(spk_emb_dict, target_pairs=len(same_sims))
 
         return same_sims, diff_sims
-    
+
     def save_checkpoint(self, step, log):
         torch.save(
             {
@@ -169,7 +175,7 @@ class EmbeddingModelTrainer:
                 "optimizer": self.optimizer.state_dict(),
                 "step": step,
                 "log": log,
-                "speaker_paths": self.dev_batch_generator.speaker_paths
+                "speaker_paths": self.dev_batch_generator.speaker_paths,
             },
             self.model_path,
         )
@@ -201,10 +207,9 @@ class EmbeddingModelTrainer:
                 log["same_spk_similarity"].append(mean_same)
                 log["different_spk_similarity"].append(mean_diff)
                 log["margin"].append(margin)
-                
+
             if step % SAVE_INTERVAL == 0 or step == ITER_NUM - 1:
                 self.save_checkpoint(step, log)
-                       
 
         log["loss_history_EMA"] = (
             pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
@@ -216,10 +221,10 @@ class EmbeddingModelTrainer:
 
     # Metrics
     def evaluate(self):
-        # TODO otestovat
+        # use all speakers in test part
         self.test_batch_generator.speakers_num = (
             self.test_batch_generator.total_unique_speakers
-        )  # use all speakers in test part
+        )
 
         self.embed_model.eval()  # Set to evaluation mode and disable gradient calculation
         with torch.no_grad():
@@ -234,7 +239,7 @@ class EmbeddingModelTrainer:
         min_dcf, dcf_threshold = minDCF_metric(scores, labels)
 
         print("Evaluation")
-        print(f"Test EER: {eer*100:.2f}% (at threshold: {eer_threshold:.4f})")
-        print(f"Test Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
+        print(f"EER: {eer*100:.2f}% (at threshold: {eer_threshold:.4f})")
+        print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
 
         self.embed_model.train()
