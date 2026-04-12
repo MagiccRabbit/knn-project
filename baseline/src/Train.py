@@ -12,16 +12,7 @@ from pathlib import Path
 from collections import defaultdict
 
 
-ITER_NUM = 1000
-EVAL_INTERVAL = 5
-SAVE_INTERVAL = 50
-SPEAKER_LIMIT = None  # None for no limit
-
-MODEL_DIR = "model"
-MODEL_NAME = "checkpoint_" + str(ITER_NUM)
-
-
-def show_and_save_figs(log):
+def show_and_save_figs(log, model_dir, model_name):
     plt.figure(figsize=(10, 5))
     plt.plot(log["loss_history"], label="Trénovací loss")
     plt.title("Loss")
@@ -29,7 +20,7 @@ def show_and_save_figs(log):
     plt.ylabel("Loss hodnota")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_loss.png")
+    plt.savefig(model_dir + "/" + model_name + "_loss.png")
     plt.show()
 
     plt.figure(figsize=(10, 5))
@@ -39,7 +30,7 @@ def show_and_save_figs(log):
     plt.ylabel("EMA loss hodnoty")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_EMA.png")
+    plt.savefig(model_dir + "/" + model_name + "_EMA.png")
     plt.show()
 
     plt.figure(figsize=(10, 5))
@@ -49,7 +40,7 @@ def show_and_save_figs(log):
     plt.ylabel("Loss hodnota")
     plt.legend()
     plt.grid(True)
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_grad-norm.png")
+    plt.savefig(model_dir + "/" + model_name + "_grad-norm.png")
     plt.show()
 
     plt.figure(figsize=(10, 5))
@@ -59,7 +50,7 @@ def show_and_save_figs(log):
     plt.legend()
     plt.xlabel("step")
     plt.ylabel("similarity")
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_margin.png")
+    plt.savefig(model_dir + "/" + model_name + "_margin.png")
     plt.show()
     
     plt.figure(figsize=(10, 5))
@@ -68,7 +59,7 @@ def show_and_save_figs(log):
     #plt.legend()
     plt.xlabel("step")
     plt.ylabel("min_dcf")
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_min_dfc.png")
+    plt.savefig(model_dir + "/" + model_name + "_min_dfc.png")
     plt.show()
     
     plt.figure(figsize=(10, 5))
@@ -77,7 +68,7 @@ def show_and_save_figs(log):
     #plt.legend()
     plt.xlabel("step")
     plt.ylabel("EER")
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_eer.png")
+    plt.savefig(model_dir + "/" + model_name + "_eer.png")
     plt.show()
     
     plt.figure(figsize=(10, 5))
@@ -86,7 +77,7 @@ def show_and_save_figs(log):
     plt.legend()
     plt.xlabel("step")
     plt.ylabel("value")
-    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_thresholds.png")
+    plt.savefig(model_dir + "/" + model_name + "_thresholds.png")
     plt.show()
 
 def compute_grad_norm(model):
@@ -132,9 +123,9 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
 
 class EmbeddingModelTrainer:
-    def __init__(self, dev_dataset_dir, test_dataset_dir):
+    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 100, eval_interval = 50, save_interval = 10, model_dir = "model"):
         self.dev_batch_generator = BatchGenerator.BatchGenerator(
-            dev_dataset_dir, max_unique=SPEAKER_LIMIT
+            dev_dataset_dir, max_unique=speaker_limit
         )
         self.test_batch_generator = BatchGenerator.BatchGenerator(
             test_dataset_dir, max_unique=None, segments_num=20
@@ -162,15 +153,21 @@ class EmbeddingModelTrainer:
             "dcf_threshold": []
         }
 
+        self.iter_num = iter_num
+        self.eval_interval = eval_interval
+        self.save_interval = save_interval
+        self.model_dir = model_dir
+        self.model_name = "checkpoint_" + str(self.iter_num)
+
         # load model if exists
         model_dir = (
             Path(__file__)
             .resolve()
-            .parent.parent.joinpath(MODEL_DIR)  # baseline/MODEL_DIR/
+            .parent.parent.joinpath( self.model_dir)  # baseline/MODEL_DIR/
         )
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        self.model_path = model_dir.joinpath(f"{MODEL_NAME}.pt")
+        self.model_path = model_dir.joinpath(f"{self.model_name}.pt")
         self.last_step = -1
         if self.model_path.exists():
             checkpoint = torch.load(self.model_path, weights_only=False)
@@ -217,7 +214,7 @@ class EmbeddingModelTrainer:
         criterion = self.criterion
         log = self.log
 
-        for step in range(self.last_step + 1, ITER_NUM):
+        for step in range(self.last_step + 1, self.iter_num):
             batch, labels = self.get_batch(self.dev_batch_generator)
             embeddings, logits = embed_model.forward(batch)
 
@@ -228,9 +225,9 @@ class EmbeddingModelTrainer:
             optimizer.step()
 
             log["loss_history"].append(loss.item())
-            print(f"Iterace č. {step + 1}/{ITER_NUM}, loss: {loss.item()}")
+            print(f"Iterace č. {step + 1}/{self.iter_num}, loss: {loss.item()}")
 
-            if step % EVAL_INTERVAL == 0:
+            if step % self.eval_interval == 0:
                 same_sims, diff_sims = self.evaluate_pairs(embeddings, labels)
                 mean_same = np.mean(same_sims)
                 mean_diff = np.mean(diff_sims)
@@ -244,14 +241,14 @@ class EmbeddingModelTrainer:
                 log["min_dcf"].append(min_dcf)
                 log["dcf_threshold"].append(dcf_threshold)
 
-            if step % SAVE_INTERVAL == 0 or step == ITER_NUM - 1:
+            if step % self.save_interval == 0 or step == self.iter_num - 1:
                 self.save_checkpoint(step, log)
 
         log["loss_history_EMA"] = (
             pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
         )
 
-        show_and_save_figs(log)
+        show_and_save_figs(log,self.model_dir,self.model_name)
 
         return embed_model
 

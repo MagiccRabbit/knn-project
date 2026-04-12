@@ -1,6 +1,27 @@
 from sklearn.metrics import roc_curve
+from sklearn.metrics import roc_auc_score
 import numpy as np
 
+
+def roc_auc_metric(score, labels):
+    auc = roc_auc_score(labels, score)
+    return auc
+
+def d_prime_metric(labels, score):
+    labels = np.array(labels)
+    score = np.array(score)
+    
+    # Skóre pro pozitivní (stejní) a negativní (různí) dvojice
+    positives = score[labels == 1]
+    negatives = score[labels == 0]
+    
+    # Výpočet průměrů a směrodatných odchylek
+    mu_pos, std_pos = np.mean(positives), np.std(positives)
+    mu_neg, std_neg = np.mean(negatives), np.std(negatives)
+    
+    # Klasický vzorec pro d-prime
+    d_prime = (mu_pos - mu_neg) / np.sqrt(0.5 * (std_pos**2 + std_neg**2))
+    return d_prime
 
 # Lowest distance between false positive and false negative
 def eer_metric(scores,labels):

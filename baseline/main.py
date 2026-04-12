@@ -62,13 +62,15 @@ def download_dataset(delete_cache=True):
             # Execute the deletion
             delete_strategy.execute()
 
-    return dev_dir.joinpath("wav"), test_dir.joinpath("wav")
+    #dev_dir.joinpath("wav")
+    return test_dir.joinpath("wav")
 
 if __name__ == "__main__":
     dev_root, test_root = download_dataset()
-
+    
     model = EmbeddingModelTrainer(dev_root, test_root)
+    
     print("Training/Loading model")
-    model.train()
+    model.train()    
     print("Evaluating model")
     model.evaluate()
