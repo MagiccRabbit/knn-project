@@ -12,10 +12,10 @@ from pathlib import Path
 from collections import defaultdict
 
 
-ITER_NUM = 50
+ITER_NUM = 1000
 EVAL_INTERVAL = 5
 SAVE_INTERVAL = 50
-SPEAKER_LIMIT = 100  # None for no limit
+SPEAKER_LIMIT = None  # None for no limit
 
 MODEL_DIR = "model"
 MODEL_NAME = "checkpoint_" + str(ITER_NUM)
@@ -63,18 +63,20 @@ def show_and_save_figs(log):
     plt.show()
     
     plt.figure(figsize=(10, 5))
+    plt.title("Min DCF")
     plt.plot(log["min_dcf"], label="Min DF")
-    plt.legend()
+    #plt.legend()
     plt.xlabel("step")
-    plt.ylabel("value")
+    plt.ylabel("min_dcf")
     plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_min_dfc.png")
     plt.show()
     
     plt.figure(figsize=(10, 5))
+    plt.title("EER")
     plt.plot(log["eer"], label="EER")
-    plt.legend()
+    #plt.legend()
     plt.xlabel("step")
-    plt.ylabel("value")
+    plt.ylabel("EER")
     plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_eer.png")
     plt.show()
     
@@ -135,7 +137,7 @@ class EmbeddingModelTrainer:
             dev_dataset_dir, max_unique=SPEAKER_LIMIT
         )
         self.test_batch_generator = BatchGenerator.BatchGenerator(
-            test_dataset_dir, max_unique=None, segments_num=30
+            test_dataset_dir, max_unique=None, segments_num=20
         )
         # augment = AudioAugment.AudioAugment()
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
@@ -265,7 +267,7 @@ class EmbeddingModelTrainer:
             batch, labels = self.get_batch(self.test_batch_generator)
 
             embeddings, logits = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels, pairs_per_spk=10)
+            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels, pairs_per_spk=6)
 
         scores = same_sims + diff_sims
         labels = [1] * len(same_sims) + [0] * len(diff_sims)
