@@ -12,7 +12,7 @@ from pathlib import Path
 from collections import defaultdict
 
 
-ITER_NUM = 1000
+ITER_NUM = 50
 EVAL_INTERVAL = 5
 SAVE_INTERVAL = 50
 SPEAKER_LIMIT = 100  # None for no limit
@@ -61,7 +61,31 @@ def show_and_save_figs(log):
     plt.ylabel("similarity")
     plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_margin.png")
     plt.show()
-
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(log["min_dcf"], label="Min DF")
+    plt.legend()
+    plt.xlabel("step")
+    plt.ylabel("value")
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_min_dfc.png")
+    plt.show()
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(log["eer"], label="EER")
+    plt.legend()
+    plt.xlabel("step")
+    plt.ylabel("value")
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_eer.png")
+    plt.show()
+    
+    plt.figure(figsize=(10, 5))
+    plt.plot(log["dcf_threshold"], label="DCF Threshold")
+    plt.plot(log["eer_threshold"], label="EER Threshold")
+    plt.legend()
+    plt.xlabel("step")
+    plt.ylabel("value")
+    plt.savefig(MODEL_DIR + "/" + MODEL_NAME + "_thresholds.png")
+    plt.show()
 
 def compute_grad_norm(model):
     total_norm = 0.0
@@ -111,7 +135,7 @@ class EmbeddingModelTrainer:
             dev_dataset_dir, max_unique=SPEAKER_LIMIT
         )
         self.test_batch_generator = BatchGenerator.BatchGenerator(
-            test_dataset_dir, max_unique=None
+            test_dataset_dir, max_unique=None, segments_num=30
         )
         # augment = AudioAugment.AudioAugment()
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
@@ -130,6 +154,10 @@ class EmbeddingModelTrainer:
             "same_spk_similarity": [],
             "different_spk_similarity": [],
             "margin": [],
+            "eer": [],
+            "eer_threshold": [],
+            "min_dcf": [],
+            "dcf_threshold": []
         }
 
         # load model if exists
@@ -160,11 +188,11 @@ class EmbeddingModelTrainer:
 
         return batch, labels
 
-    def evaluate_pairs(self, embeddings, labels):
+    def evaluate_pairs(self, embeddings, labels, pairs_per_spk = 3):
         spk_emb_dict = defaultdict(list)
         for emb, spk in zip(embeddings, labels):
             spk_emb_dict[spk.item()].append(emb)
-        same_sims = compute_same_sims(spk_emb_dict, pairs_per_spk=3)
+        same_sims = compute_same_sims(spk_emb_dict, pairs_per_spk=pairs_per_spk)
         diff_sims = compute_diff_sims(spk_emb_dict, target_pairs=len(same_sims))
 
         return same_sims, diff_sims
@@ -208,6 +236,11 @@ class EmbeddingModelTrainer:
                 log["same_spk_similarity"].append(mean_same)
                 log["different_spk_similarity"].append(mean_diff)
                 log["margin"].append(margin)
+                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate()
+                log["eer"].append(eer)
+                log["eer_threshold"].append(eer_threshold)
+                log["min_dcf"].append(min_dcf)
+                log["dcf_threshold"].append(dcf_threshold)
 
             if step % SAVE_INTERVAL == 0 or step == ITER_NUM - 1:
                 self.save_checkpoint(step, log)
@@ -232,7 +265,7 @@ class EmbeddingModelTrainer:
             batch, labels = self.get_batch(self.test_batch_generator)
 
             embeddings, logits = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels)
+            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels, pairs_per_spk=10)
 
         scores = same_sims + diff_sims
         labels = [1] * len(same_sims) + [0] * len(diff_sims)
@@ -244,3 +277,5 @@ class EmbeddingModelTrainer:
         print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
 
         self.embed_model.train()
+        
+        return eer, eer_threshold, min_dcf, dcf_threshold
