@@ -123,7 +123,7 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
 
 class EmbeddingModelTrainer:
-    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 1000, eval_interval = 50, save_interval = 10, model_dir = "model"):
+    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 2000, eval_interval = 50, save_interval = 10, model_dir = "model"):
         self.dev_batch_generator = BatchGenerator.BatchGenerator(
             dev_dataset_dir, max_unique=speaker_limit
         )

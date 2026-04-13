@@ -26,7 +26,7 @@ class EmbeddingModel(nn.Module):
 
         #dropout
         self.dropout_conv = nn.Dropout1d(p=0.3)
-        self.dropout_pooling = nn.Dropout(p=0.3)
+        self.dropout_pooling = nn.Dropout(p=0.1)
 
         self.classifier = nn.Linear(embedding_dim, num_speakers)
 

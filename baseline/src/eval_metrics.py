@@ -54,5 +54,8 @@ def minDCF_metric(scores,labels):
         if dcf < min_dcf:
             min_dcf = dcf
             threshold = thresholds[i]
+    
+    c_def = min(c_fn * p_target, c_fp * (1 - p_target))
+    min_dcf = min_dcf / c_def
 
     return min_dcf, threshold
