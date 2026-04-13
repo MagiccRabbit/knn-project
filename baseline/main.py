@@ -63,7 +63,7 @@ def download_dataset(delete_cache=True):
             delete_strategy.execute()
 
     #dev_dir.joinpath("wav")
-    return test_dir.joinpath("wav")
+    return dev_dir.joinpath("wav"), test_dir.joinpath("wav")
 
 if __name__ == "__main__":
     dev_root, test_root = download_dataset()

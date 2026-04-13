@@ -123,7 +123,7 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
 
 class EmbeddingModelTrainer:
-    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 100, eval_interval = 50, save_interval = 10, model_dir = "model"):
+    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 1000, eval_interval = 50, save_interval = 10, model_dir = "model"):
         self.dev_batch_generator = BatchGenerator.BatchGenerator(
             dev_dataset_dir, max_unique=speaker_limit
         )
@@ -132,12 +132,13 @@ class EmbeddingModelTrainer:
         )
         # augment = AudioAugment.AudioAugment()
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
+        print(self.dev_batch_generator.total_unique_speakers)
         self.embed_model = EmbeddingModel.EmbeddingModel(
             num_speakers=self.dev_batch_generator.total_unique_speakers
         )
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = AdamW(
-            self.embed_model.parameters(), lr=2e-5, weight_decay=0.01
+            self.embed_model.parameters(), lr=1e-3, weight_decay=1e-4
         )
 
         self.log = {
