@@ -3,6 +3,7 @@ from pathlib import Path
 from src.Train import EmbeddingModelTrainer
 import zipfile
 import os
+import argparse
 
 REPO_ID = "ProgramComputer/voxceleb"
 FILENAME_DEV = "vox1/vox1_dev_wav.zip"
@@ -67,10 +68,21 @@ def download_dataset(delete_cache=True):
 
 if __name__ == "__main__":
     dev_root, test_root = download_dataset()
-    
-    model = EmbeddingModelTrainer(dev_root, test_root)
-    
-    print("Training/Loading model")
-    model.train()    
-    print("Evaluating model")
-    model.evaluate()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--baseline", action="store_true")
+
+    args = parser.parse_args()
+    if args.baseline:
+        model = EmbeddingModelTrainer(dev_root, test_root)
+        
+        print("Training/Loading BASELINE model")
+        model.train()    
+        print("Evaluating BASELINE model")
+        model.evaluate()
+    else:
+        model = EmbeddingModelTrainer(dev_root, test_root,base_model=False, model_dir="model2")
+        print("Training/Loading MAIN model")
+        model.train_ECAPA()    
+        print("Evaluating MAIN model")
+        model.evaluate_ECAPA()

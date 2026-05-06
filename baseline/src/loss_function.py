@@ -6,13 +6,14 @@ import math
 # Some ideas taken from https://github.com/clovaai/voxceleb_trainer/blob/master/loss/aamsoftmax.py
 
 class AAM_loss(nn.Module):
-    def __init__(self, embed_dim, n_speakers, scale = 30.0, margin = 0.2):
+    def __init__(self, embed_dim, n_speakers, device, scale = 30.0, margin = 0.2):
         super().__init__()
         self.margin = margin
+        self.device = device
         self.scale = scale
         self.n_speakers = n_speakers
         self.embed_dim = embed_dim
-        self.W = nn.Parameter(torch.FloatTensor(self.embed_dim, self.n_speakers), requires_grad=True)
+        self.W = nn.Parameter(torch.FloatTensor(self.n_speakers, self.embed_dim), requires_grad=True)
         nn.init.xavier_normal_(self.W,gain= 1)
 
         # Precomputation
@@ -26,14 +27,15 @@ class AAM_loss(nn.Module):
         W = F.normalize(self.W, dim=1)
 
 
-        cos = F.linear(x, W) 
+        cos = F.linear(x, W)
+        cos = cos.clamp(-1 + 1e-7, 1 - 1e-7) 
 
-        sin = torch.sqrt((1.0 - torch.mul(cos,cos)).clamp(0,1))
+        sin = torch.sqrt((1.0 - torch.mul(cos,cos)))
 
         phi = cos * self.cos_m - sin * self.sin_m
         phi = torch.where(cos > self.th, phi, cos - self.mm)
 
-        one_hot = torch.zeros_like(cos)
+        one_hot = torch.zeros_like(cos,device=self.device)
         one_hot.scatter_(1, labels.view(-1, 1), 1.0)
 
         output = (one_hot * phi) + ((1.0 - one_hot) * cos)
