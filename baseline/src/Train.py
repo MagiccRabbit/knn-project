@@ -1,3 +1,17 @@
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module="torchaudio"
+)
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module="torch_audiomentations"
+)
+
 import torch
 import torch.nn as nn
 import matplotlib.pyplot as plt
@@ -17,6 +31,8 @@ from .eval_metrics import eer_metric, minDCF_metric
 from torch.optim import AdamW
 from pathlib import Path
 from collections import defaultdict
+
+MAX_TRAIN_EVAL_PAIRS = 500
 
 
 def show_and_save_figs(log, model_dir, model_name):
@@ -142,26 +158,17 @@ class EmbeddingModelTrainer:
         model_dir="model",
         base_model=True,
     ):
-        self.dev_batch_generator = BatchGenerator.BatchGenerator(
-            dataset_paths.train_dataset,
-            dataset_paths.noise_dataset,
-            dataset_paths.reverb_dataset,
+        self.batch_generator = BatchGenerator.BatchGenerator(
+            dataset_paths,
             max_unique=speaker_limit,
-        )
-
-        self.test_batch_generator = BatchGenerator.BatchGenerator(
-            dataset_paths.train_dataset,
-            dataset_paths.noise_dataset,
-            dataset_paths.reverb_dataset,
-            max_unique=None,
-            segments_num=20,
         )
 
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
         # print(self.dev_batch_generator.total_unique_speakers)
-        self.speakers = self.dev_batch_generator.total_unique_speakers
+        self.speakers = self.batch_generator.total_unique_train_speakers
 
         if base_model:
+            self.device = "cpu"
             self.embed_model = EmbeddingModel.EmbeddingModel(num_speakers=self.speakers)
             self.criterion = nn.CrossEntropyLoss()
             self.optimizer = AdamW(
@@ -214,12 +221,11 @@ class EmbeddingModelTrainer:
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.log = checkpoint["log"]
             self.last_step = checkpoint["step"]
-            self.dev_batch_generator.set_speaker_paths(checkpoint["speaker_paths"])
+            self.batch_generator.set_train_speaker_paths(checkpoint["speaker_paths"])
 
             # show_and_save_figs(old_log)
 
-    def get_batch(self, batch_generator):
-        batch, labels = batch_generator.generate_random_speaker_balanced_batch()
+    def get_features_batch(self, batch, labels):
         batch = torch.stack([self.feature_extractor.get_features(b) for b in batch])
         # batch = batch.float
         labels = torch.tensor(labels)
@@ -242,7 +248,7 @@ class EmbeddingModelTrainer:
                 "optimizer": self.optimizer.state_dict(),
                 "step": step,
                 "log": log,
-                "speaker_paths": self.dev_batch_generator.speaker_paths,
+                "speaker_paths": self.batch_generator.speaker_paths,
             },
             self.model_path,
         )
@@ -254,7 +260,8 @@ class EmbeddingModelTrainer:
         log = self.log
 
         for step in range(self.last_step + 1, self.iter_num):
-            batch, labels = self.get_batch(self.dev_batch_generator)
+            batch, labels = self.batch_generator.generate_random_speaker_balanced_batch()
+            batch, labels = self.get_features_batch(batch, labels)
             embeddings, logits = embed_model.forward(batch)
 
             loss = criterion(logits, labels)
@@ -274,7 +281,7 @@ class EmbeddingModelTrainer:
                 log["same_spk_similarity"].append(mean_same)
                 log["different_spk_similarity"].append(mean_diff)
                 log["margin"].append(margin)
-                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate()
+                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate(MAX_TRAIN_EVAL_PAIRS)
                 log["eer"].append(eer)
                 log["eer_threshold"].append(eer_threshold)
                 log["min_dcf"].append(min_dcf)
@@ -298,7 +305,9 @@ class EmbeddingModelTrainer:
         log = self.log
 
         for step in range(self.last_step + 1, self.iter_num):
-            batch, labels = self.get_batch(self.dev_batch_generator)
+            batch, labels = self.batch_generator.generate_random_speaker_balanced_batch()
+            batch, labels = self.get_features_batch(batch, labels)
+            
             batch = batch.to(self.device)
             labels = labels.to(self.device)
             embeddings = embed_model.forward(batch)
@@ -320,7 +329,7 @@ class EmbeddingModelTrainer:
                 log["same_spk_similarity"].append(mean_same)
                 log["different_spk_similarity"].append(mean_diff)
                 log["margin"].append(margin)
-                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate_ECAPA()
+                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate(MAX_TRAIN_EVAL_PAIRS)
                 log["eer"].append(eer)
                 log["eer_threshold"].append(eer_threshold)
                 log["min_dcf"].append(min_dcf)
@@ -338,53 +347,43 @@ class EmbeddingModelTrainer:
         return embed_model
 
     # Metrics
-    def evaluate(self):
-        # use all speakers in test part
-        self.test_batch_generator.speakers_num = (
-            self.test_batch_generator.total_unique_speakers
-        )
-
+    def evaluate(self, max_pairs: None | int = None):
         self.embed_model.eval()  # Set to evaluation mode and disable gradient calculation
+        scores = []
+        labels = []
+        eval_batch_size = 64
+        
+        max_pairs = max_pairs if max_pairs else len(self.batch_generator.evaluation_pairs)
+        
         with torch.no_grad():
-            batch, labels = self.get_batch(self.test_batch_generator)
+            for i in range(0, max_pairs, eval_batch_size):
+                #get pairs
+                audio_a, audio_b, batch_labels = self.batch_generator.get_evaluation_batch(
+                    batch_size=eval_batch_size, 
+                    start_idx=i
+                )
+                
+                audio_a = audio_a.to(self.device)
+                audio_a = torch.stack([self.feature_extractor.get_features(b) for b in audio_a])
+                
+                audio_b = audio_b.to(self.device)
+                audio_b = torch.stack([self.feature_extractor.get_features(b) for b in audio_b])
+                
+                batch_labels = batch_labels.to(self.device)
 
-            embeddings, logits = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(
-                embeddings, labels, pairs_per_spk=6
-            )
+                # Extract Embeddings
+                emb_a = self.embed_model.forward(audio_a)
+                emb_b = self.embed_model.forward(audio_b)
+                
+                emb_a = emb_a[0] if isinstance(emb_a, tuple) else emb_a
+                emb_b = emb_b[0] if isinstance(emb_b, tuple) else emb_b
+                
+                # Cosine Similarity
+                sim = F.cosine_similarity(emb_a, emb_b, dim=1)
+                
+                scores.extend(sim.cpu().numpy().tolist())
+                labels.extend(batch_labels.cpu().numpy().tolist())
 
-        scores = same_sims + diff_sims
-        labels = [1] * len(same_sims) + [0] * len(diff_sims)
-        eer, eer_threshold = eer_metric(scores, labels)
-        min_dcf, dcf_threshold = minDCF_metric(scores, labels)
-
-        print("Evaluation")
-        print(f"EER: {eer*100:.2f}% (at threshold: {eer_threshold:.4f})")
-        print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
-
-        self.embed_model.train()
-
-        return eer, eer_threshold, min_dcf, dcf_threshold
-
-    def evaluate_ECAPA(self):
-        # use all speakers in test part
-        self.test_batch_generator.speakers_num = (
-            self.test_batch_generator.total_unique_speakers
-        )
-
-        self.embed_model.eval()  # Set to evaluation mode and disable gradient calculation
-        with torch.no_grad():
-            batch, labels = self.get_batch(self.test_batch_generator)
-            batch = batch.to(self.device)
-            labels = labels.to(self.device)
-
-            embeddings = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(
-                embeddings, labels, pairs_per_spk=6
-            )
-
-        scores = same_sims + diff_sims
-        labels = [1] * len(same_sims) + [0] * len(diff_sims)
         eer, eer_threshold = eer_metric(scores, labels)
         min_dcf, dcf_threshold = minDCF_metric(scores, labels)
 

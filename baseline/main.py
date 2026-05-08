@@ -2,8 +2,6 @@ from src.Train import EmbeddingModelTrainer
 from src.download_dataset import download_dataset
 import argparse
 
-#TODO: change all prints to english or czech
-
 if __name__ == "__main__":
     dataset_paths = download_dataset()
 
@@ -11,7 +9,7 @@ if __name__ == "__main__":
     parser.add_argument("--baseline", action="store_true")
 
     args = parser.parse_args()
-    if True:
+    if args.baseline:
         model = EmbeddingModelTrainer(dataset_paths)
         
         print("Training/Loading BASELINE model")
@@ -23,4 +21,4 @@ if __name__ == "__main__":
         print("Training/Loading MAIN model")
         model.train_ECAPA()    
         print("Evaluating MAIN model")
-        model.evaluate_ECAPA()
+        model.evaluate()

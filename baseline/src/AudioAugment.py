@@ -12,28 +12,19 @@ from torch_audiomentations import (
 )
 
 class RescaledImpulseResponse(nn.Module):
-    def __init__(self, ir_paths, p=1.0, sample_rate=16000):
+    def __init__(self, ir_paths, device, p=1.0, sample_rate=16000):
         super().__init__()
         self.ir_transform = ApplyImpulseResponse(
             ir_paths=ir_paths, p=p, output_type="tensor"
-        )
+        ).to(device)
         self.sample_rate = sample_rate
 
     def forward(self, samples, sample_rate=None):
-        # 1. Capture the 'Dry' RMS (original volume)
-        # Using dim=-1 to calculate RMS per channel/track in the batch
         input_rms = torch.sqrt(torch.mean(samples**2, dim=-1, keepdim=True))
-
-        # 2. Apply the reverb
-        # We pass self.sample_rate if the pipeline doesn't provide one
+        
         sr = sample_rate if sample_rate is not None else self.sample_rate
         augmented = self.ir_transform(samples, sample_rate=sr)
-
-        # 3. Capture the 'Wet' RMS (quiet reverb volume)
         output_rms = torch.sqrt(torch.mean(augmented**2, dim=-1, keepdim=True))
-
-        # 4. Match levels: Scale 'Wet' back to 'Dry'
-        # Add a tiny epsilon to avoid division by zero
         return augmented * (input_rms / (output_rms + 1e-7))
 
 
@@ -50,7 +41,7 @@ class AudioAugment:
             [
                 # Apply reverb
                 RescaledImpulseResponse(
-                    ir_paths=str(rir_root_dir), p=0.4
+                    ir_paths=str(rir_root_dir), device=self.device, p=0.4
                 ),
                 # Add background noise
                 AddBackgroundNoise(
