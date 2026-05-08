@@ -5,7 +5,14 @@ import pandas as pd
 import random
 import torch.nn.functional as F
 import numpy as np
-from . import BatchGenerator, AudioAugment, FeatureExtractor, EmbeddingModel, model, loss_function
+from . import (
+    BatchGenerator,
+    FeatureExtractor,
+    EmbeddingModel,
+    model,
+    loss_function,
+    download_dataset,
+)
 from .eval_metrics import eer_metric, minDCF_metric
 from torch.optim import AdamW
 from pathlib import Path
@@ -52,25 +59,25 @@ def show_and_save_figs(log, model_dir, model_name):
     plt.ylabel("similarity")
     plt.savefig(model_dir + "/" + model_name + "_margin.png")
     plt.show()
-    
+
     plt.figure(figsize=(10, 5))
     plt.title("Min DCF")
     plt.plot(log["min_dcf"], label="Min DF")
-    #plt.legend()
+    # plt.legend()
     plt.xlabel("step")
     plt.ylabel("min_dcf")
     plt.savefig(model_dir + "/" + model_name + "_min_dfc.png")
     plt.show()
-    
+
     plt.figure(figsize=(10, 5))
     plt.title("EER")
     plt.plot(log["eer"], label="EER")
-    #plt.legend()
+    # plt.legend()
     plt.xlabel("step")
     plt.ylabel("EER")
     plt.savefig(model_dir + "/" + model_name + "_eer.png")
     plt.show()
-    
+
     plt.figure(figsize=(10, 5))
     plt.plot(log["dcf_threshold"], label="DCF Threshold")
     plt.plot(log["eer_threshold"], label="EER Threshold")
@@ -79,6 +86,7 @@ def show_and_save_figs(log, model_dir, model_name):
     plt.ylabel("value")
     plt.savefig(model_dir + "/" + model_name + "_thresholds.png")
     plt.show()
+
 
 def compute_grad_norm(model):
     total_norm = 0.0
@@ -123,22 +131,38 @@ def compute_diff_sims(spk_emb_dict, target_pairs):
 
 
 class EmbeddingModelTrainer:
-    def __init__(self, dev_dataset_dir, test_dataset_dir, speaker_limit = None, iter_num = 2000, eval_interval = 50, save_interval = 10, embed_dim = 192 ,model_dir = "model", base_model = True):
+    def __init__(
+        self,
+        dataset_paths: download_dataset.DatasetPaths,
+        speaker_limit=None,
+        iter_num=2000,
+        eval_interval=50,
+        save_interval=10,
+        embed_dim=192,
+        model_dir="model",
+        base_model=True,
+    ):
         self.dev_batch_generator = BatchGenerator.BatchGenerator(
-            dev_dataset_dir, max_unique=speaker_limit
+            dataset_paths.train_dataset,
+            dataset_paths.noise_dataset,
+            dataset_paths.reverb_dataset,
+            max_unique=speaker_limit,
         )
+
         self.test_batch_generator = BatchGenerator.BatchGenerator(
-            test_dataset_dir, max_unique=None, segments_num=20
+            dataset_paths.train_dataset,
+            dataset_paths.noise_dataset,
+            dataset_paths.reverb_dataset,
+            max_unique=None,
+            segments_num=20,
         )
-        # augment = AudioAugment.AudioAugment()
+
         self.feature_extractor = FeatureExtractor.FeatureExtractor()
-        #print(self.dev_batch_generator.total_unique_speakers)
+        # print(self.dev_batch_generator.total_unique_speakers)
         self.speakers = self.dev_batch_generator.total_unique_speakers
 
         if base_model:
-            self.embed_model = EmbeddingModel.EmbeddingModel(
-                num_speakers=self.speakers
-            )
+            self.embed_model = EmbeddingModel.EmbeddingModel(num_speakers=self.speakers)
             self.criterion = nn.CrossEntropyLoss()
             self.optimizer = AdamW(
                 self.embed_model.parameters(), lr=1e-3, weight_decay=1e-4
@@ -146,13 +170,14 @@ class EmbeddingModelTrainer:
         else:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.embed_model = model.ECAPA_TDNN(embd_dim=embed_dim).to(self.device)
-            self.criterion = loss_function.AAM_loss(embed_dim=embed_dim,n_speakers=self.speakers, device=self.device).to(self.device)
+            self.criterion = loss_function.AAM_loss(
+                embed_dim=embed_dim, n_speakers=self.speakers, device=self.device
+            ).to(self.device)
             self.optimizer = AdamW(
-                list(self.embed_model.parameters()) + list(self.criterion.parameters()), 
-                lr=1e-3, 
-                weight_decay=1e-4
+                list(self.embed_model.parameters()) + list(self.criterion.parameters()),
+                lr=1e-3,
+                weight_decay=1e-4,
             )
-
 
         self.log = {
             "loss_history": [],
@@ -164,7 +189,7 @@ class EmbeddingModelTrainer:
             "eer": [],
             "eer_threshold": [],
             "min_dcf": [],
-            "dcf_threshold": []
+            "dcf_threshold": [],
         }
 
         self.iter_num = iter_num
@@ -173,12 +198,11 @@ class EmbeddingModelTrainer:
         self.model_dir = model_dir
         self.model_name = "checkpoint_" + str(self.iter_num)
 
-
         # load model if exists
         model_dir = (
             Path(__file__)
             .resolve()
-            .parent.parent.joinpath( self.model_dir)  # baseline/MODEL_DIR/
+            .parent.parent.joinpath(self.model_dir)  # baseline/MODEL_DIR/
         )
         model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -202,7 +226,7 @@ class EmbeddingModelTrainer:
 
         return batch, labels
 
-    def evaluate_pairs(self, embeddings, labels, pairs_per_spk = 3):
+    def evaluate_pairs(self, embeddings, labels, pairs_per_spk=3):
         spk_emb_dict = defaultdict(list)
         for emb, spk in zip(embeddings, labels):
             spk_emb_dict[spk.item()].append(emb)
@@ -263,10 +287,9 @@ class EmbeddingModelTrainer:
             pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
         )
 
-        show_and_save_figs(log,self.model_dir,self.model_name)
+        show_and_save_figs(log, self.model_dir, self.model_name)
 
         return embed_model
-    
 
     def train_ECAPA(self):
         embed_model = self.embed_model
@@ -310,7 +333,7 @@ class EmbeddingModelTrainer:
             pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
         )
 
-        show_and_save_figs(log,self.model_dir,self.model_name)
+        show_and_save_figs(log, self.model_dir, self.model_name)
 
         return embed_model
 
@@ -326,7 +349,9 @@ class EmbeddingModelTrainer:
             batch, labels = self.get_batch(self.test_batch_generator)
 
             embeddings, logits = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels, pairs_per_spk=6)
+            same_sims, diff_sims = self.evaluate_pairs(
+                embeddings, labels, pairs_per_spk=6
+            )
 
         scores = same_sims + diff_sims
         labels = [1] * len(same_sims) + [0] * len(diff_sims)
@@ -338,9 +363,9 @@ class EmbeddingModelTrainer:
         print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
 
         self.embed_model.train()
-        
+
         return eer, eer_threshold, min_dcf, dcf_threshold
-    
+
     def evaluate_ECAPA(self):
         # use all speakers in test part
         self.test_batch_generator.speakers_num = (
@@ -354,7 +379,9 @@ class EmbeddingModelTrainer:
             labels = labels.to(self.device)
 
             embeddings = self.embed_model.forward(batch)
-            same_sims, diff_sims = self.evaluate_pairs(embeddings, labels, pairs_per_spk=6)
+            same_sims, diff_sims = self.evaluate_pairs(
+                embeddings, labels, pairs_per_spk=6
+            )
 
         scores = same_sims + diff_sims
         labels = [1] * len(same_sims) + [0] * len(diff_sims)
@@ -366,5 +393,5 @@ class EmbeddingModelTrainer:
         print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
 
         self.embed_model.train()
-        
+
         return eer, eer_threshold, min_dcf, dcf_threshold

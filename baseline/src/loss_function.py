@@ -5,16 +5,19 @@ import math
 
 # Some ideas taken from https://github.com/clovaai/voxceleb_trainer/blob/master/loss/aamsoftmax.py
 
+
 class AAM_loss(nn.Module):
-    def __init__(self, embed_dim, n_speakers, device, scale = 30.0, margin = 0.2):
+    def __init__(self, embed_dim, n_speakers, device, scale=30.0, margin=0.2):
         super().__init__()
         self.margin = margin
         self.device = device
         self.scale = scale
         self.n_speakers = n_speakers
         self.embed_dim = embed_dim
-        self.W = nn.Parameter(torch.FloatTensor(self.n_speakers, self.embed_dim), requires_grad=True)
-        nn.init.xavier_normal_(self.W,gain= 1)
+        self.W = nn.Parameter(
+            torch.FloatTensor(self.n_speakers, self.embed_dim), requires_grad=True
+        )
+        nn.init.xavier_normal_(self.W, gain=1)
 
         # Precomputation
         self.cos_m = math.cos(self.margin)
@@ -22,20 +25,19 @@ class AAM_loss(nn.Module):
         self.th = math.cos(math.pi - self.margin)
         self.mm = math.sin(math.pi - self.margin) * self.margin
 
-    def forward(self,x , labels):
+    def forward(self, x, labels):
         x = F.normalize(x, dim=1)
         W = F.normalize(self.W, dim=1)
 
-
         cos = F.linear(x, W)
-        cos = cos.clamp(-1 + 1e-7, 1 - 1e-7) 
+        cos = cos.clamp(-1 + 1e-7, 1 - 1e-7)
 
-        sin = torch.sqrt((1.0 - torch.mul(cos,cos)))
+        sin = torch.sqrt((1.0 - torch.mul(cos, cos)))
 
         phi = cos * self.cos_m - sin * self.sin_m
         phi = torch.where(cos > self.th, phi, cos - self.mm)
 
-        one_hot = torch.zeros_like(cos,device=self.device)
+        one_hot = torch.zeros_like(cos, device=self.device)
         one_hot.scatter_(1, labels.view(-1, 1), 1.0)
 
         output = (one_hot * phi) + ((1.0 - one_hot) * cos)
@@ -44,4 +46,3 @@ class AAM_loss(nn.Module):
         loss = F.cross_entropy(output, labels)
 
         return loss
-    

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class EmbeddingModel(nn.Module):
     def __init__(self, n_mels=80, embedding_dim=192, num_speakers=100):
         super().__init__()
@@ -24,7 +25,7 @@ class EmbeddingModel(nn.Module):
         # statistics pooling (mean + std)
         self.fc = nn.Linear(512 * 2, embedding_dim)
 
-        #dropout
+        # dropout
         self.dropout_conv = nn.Dropout1d(p=0.3)
         self.dropout_pooling = nn.Dropout(p=0.1)
 
@@ -32,7 +33,7 @@ class EmbeddingModel(nn.Module):
 
     def forward(self, x):
         # x: (batch, n_mels, time)
-    
+
         identity = self.conv_shortcut(x)
         x = self.relu(self.bn1(self.conv1(x)))
         x = self.dropout_conv(x) + identity
