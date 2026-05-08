@@ -88,4 +88,4 @@ class BatchGenerator(Dataset):
         
         augmented_batch = self.augment(batch.unsqueeze(1)).squeeze(1)
         
-        return batch, labels
+        return augmented_batch, labels
