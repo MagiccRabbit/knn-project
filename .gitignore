@@ -4,3 +4,12 @@ data/
 .vscode/
 model/
 baseline/.venv/
+.venv/
+baseline/aug/
+baseline/ECAPA/
+baseline/M_aug/
+baseline/model3/
+baseline/model4/
+baseline/no_aug/
+baseline/saves/
+/baseline/saves
