@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Used https://github.com/lawlict/ECAPA-TDNN/blob/master/ecapa_tdnn.py with minor tweaks
+# Used https://github.com/lawlict/ECAPA-TDNN/blob/master/ecapa_tdnn.py with minor tweaks as base
 
 """ Res2Conv1d + BatchNorm1d + ReLU
 """
