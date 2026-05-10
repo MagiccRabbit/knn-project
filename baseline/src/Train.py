@@ -20,12 +20,13 @@ import random
 import torch.nn.functional as F
 import numpy as np
 from . import (
+    ECAPA,
     BatchGenerator,
     FeatureExtractor,
     EmbeddingModel,
-    model,
     loss_function,
     download_dataset,
+    WavVL,
 )
 from .eval_metrics import eer_metric, minDCF_metric
 from torch.optim import AdamW
@@ -151,12 +152,12 @@ class EmbeddingModelTrainer:
         self,
         dataset_paths: download_dataset.DatasetPaths,
         speaker_limit=None,
-        iter_num=2000,
-        eval_interval=50,
-        save_interval=10,
+        iter_num=4000,
+        eval_interval=200,
+        save_interval=301,
         embed_dim=192,
         model_dir="model",
-        base_model=True,
+        model = 1,
     ):
         self.batch_generator = BatchGenerator.BatchGenerator(
             dataset_paths,
@@ -167,24 +168,32 @@ class EmbeddingModelTrainer:
         # print(self.dev_batch_generator.total_unique_speakers)
         self.speakers = self.batch_generator.total_unique_train_speakers
 
-        if base_model:
-            self.device = "cpu"
+        if model == 0:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.embed_model = EmbeddingModel.EmbeddingModel(num_speakers=self.speakers)
             self.criterion = nn.CrossEntropyLoss()
             self.optimizer = AdamW(
                 self.embed_model.parameters(), lr=1e-3, weight_decay=1e-4
             )
-        else:
+        elif model == 1:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.embed_model = model.ECAPA_TDNN(embd_dim=embed_dim).to(self.device)
+            self.embed_model = ECAPA.ECAPA_TDNN(embd_dim=embed_dim).to(self.device)
             self.criterion = loss_function.AAM_loss(
                 embed_dim=embed_dim, n_speakers=self.speakers, device=self.device
             ).to(self.device)
             self.optimizer = AdamW(
-                list(self.embed_model.parameters()) + list(self.criterion.parameters()),
-                lr=1e-3,
-                weight_decay=1e-4,
+                list(self.embed_model.parameters()) + list(self.criterion.parameters()), 
+                lr=1e-3, 
+                weight_decay=1e-4
             )
+        elif model == 2:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.embed_model = WavVL.WavLM_ECAPA().to(self.device)
+            self.criterion = loss_function.AAM_loss(embed_dim=embed_dim,n_speakers=self.speakers, device=self.device).to(self.device)
+            self.optimizer = AdamW([
+                {"params": self.embed_model.ecapa.parameters()},
+            ], lr=1e-3, weight_decay=1e-2)
+            self.scaler = torch.amp.GradScaler("cuda")
 
         self.log = {
             "loss_history": [],
@@ -217,12 +226,21 @@ class EmbeddingModelTrainer:
         self.last_step = -1
         if self.model_path.exists():
             checkpoint = torch.load(self.model_path, weights_only=False)
-            self.embed_model.load_state_dict(checkpoint["model"])
+            if model == 0:
+                self.embed_model.load_state_dict(checkpoint["model"])
+            elif model == 1:
+                self.embed_model.load_state_dict(checkpoint["model"])
+                self.criterion.load_state_dict(checkpoint["criterion"])
+            elif model == 2:
+                self.embed_model.ecapa.load_state_dict(checkpoint["model"])
+                self.criterion.load_state_dict(checkpoint["criterion"])
+                self.scaler.load_state_dict(checkpoint["scaler"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
             self.log = checkpoint["log"]
             self.last_step = checkpoint["step"]
             self.batch_generator.set_train_speaker_paths(checkpoint["speaker_paths"])
 
+        #self.iter_num = 8000
             # show_and_save_figs(old_log)
 
     def get_features_batch(self, batch, labels):
@@ -246,6 +264,21 @@ class EmbeddingModelTrainer:
             {
                 "model": self.embed_model.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
+                "criterion": self.criterion.state_dict(),
+                "step": step,
+                "log": log,
+                "speaker_paths": self.batch_generator.speaker_paths,
+            },
+            self.model_path,
+        )
+
+    def save_checkpoint_WavVL(self, step, log):
+        torch.save(
+            {
+                "model": self.embed_model.ecapa.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "criterion": self.criterion.state_dict(),
+                "scaler": self.scaler.state_dict(),
                 "step": step,
                 "log": log,
                 "speaker_paths": self.batch_generator.speaker_paths,
@@ -303,7 +336,6 @@ class EmbeddingModelTrainer:
         optimizer = self.optimizer
         criterion = self.criterion
         log = self.log
-
         for step in range(self.last_step + 1, self.iter_num):
             batch, labels = self.batch_generator.generate_random_speaker_balanced_batch()
             batch, labels = self.get_features_batch(batch, labels)
@@ -345,6 +377,55 @@ class EmbeddingModelTrainer:
         show_and_save_figs(log, self.model_dir, self.model_name)
 
         return embed_model
+    
+    def train_WavVL(self):
+        embed_model = self.embed_model
+        optimizer = self.optimizer
+        criterion = self.criterion
+        log = self.log
+
+        scaler = self.scaler
+
+        for step in range(self.last_step + 1, self.iter_num):
+            audio, labels = self.batch_generator.generate_random_speaker_balanced_batch()
+            audio = audio.to(self.device)
+            labels = torch.as_tensor(labels, device=self.device)
+            labels = labels.to(self.device)
+            optimizer.zero_grad()
+            with torch.amp.autocast("cuda"):
+                embeddings = embed_model(audio)
+                loss = criterion(embeddings, labels)
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+            log["loss_history"].append(loss.item())
+            print(f"Iterace č. {step + 1}/{self.iter_num}, loss: {loss.item()}")
+
+            if step % self.eval_interval == 0:
+                same_sims, diff_sims = self.evaluate_pairs(embeddings, labels)
+                mean_same = np.mean(same_sims)
+                mean_diff = np.mean(diff_sims)
+                margin = mean_same - mean_diff
+                log["same_spk_similarity"].append(mean_same)
+                log["different_spk_similarity"].append(mean_diff)
+                log["margin"].append(margin)
+                eer, eer_threshold, min_dcf, dcf_threshold = self.evaluate_WavLM
+                log["eer"].append(eer)
+                log["eer_threshold"].append(eer_threshold)
+                log["min_dcf"].append(min_dcf)
+                log["dcf_threshold"].append(dcf_threshold)
+
+            if step % self.save_interval == 0 or step == self.iter_num - 1:
+                self.save_checkpoint_WavVL(step, log)
+
+        log["loss_history_EMA"] = (
+            pd.Series(log["loss_history"]).ewm(alpha=0.1, adjust=False).mean().to_list()
+        )
+
+        show_and_save_figs(log, self.model_dir, self.model_name)
+
+        return embed_model
 
     # Metrics
     def evaluate(self, max_pairs: None | int = None):
@@ -363,13 +444,15 @@ class EmbeddingModelTrainer:
                     start_idx=i
                 )
                 
-                audio_a = audio_a.to(self.device)
+                audio_a = audio_a.to("cpu")
                 audio_a = torch.stack([self.feature_extractor.get_features(b) for b in audio_a])
                 
-                audio_b = audio_b.to(self.device)
+                audio_b = audio_b.to("cpu")
                 audio_b = torch.stack([self.feature_extractor.get_features(b) for b in audio_b])
                 
                 batch_labels = batch_labels.to(self.device)
+                audio_a = audio_a.to(device=self.device)
+                audio_b = audio_b.to(device=self.device)
 
                 # Extract Embeddings
                 emb_a = self.embed_model.forward(audio_a)
@@ -394,3 +477,54 @@ class EmbeddingModelTrainer:
         self.embed_model.train()
 
         return eer, eer_threshold, min_dcf, dcf_threshold
+    
+    def evaluate_WavLM(self, max_pairs: None | int = None):
+        self.embed_model.eval()  # Set to evaluation mode and disable gradient calculation
+        scores = []
+        labels = []
+        eval_batch_size = 64
+        
+        max_pairs = max_pairs if max_pairs else len(self.batch_generator.evaluation_pairs)
+        
+        with torch.no_grad():
+            for i in range(0, max_pairs, eval_batch_size):
+                #get pairs
+                audio_a, audio_b, batch_labels = self.batch_generator.get_evaluation_batch(
+                    batch_size=eval_batch_size, 
+                    start_idx=i
+                )
+                
+                #audio_a = audio_a.to("cpu")
+                #audio_a = torch.stack([self.feature_extractor.get_features(b) for b in audio_a])
+                
+                #audio_b = audio_b.to("cpu")
+                #audio_b = torch.stack([self.feature_extractor.get_features(b) for b in audio_b])
+                
+                batch_labels = batch_labels.to(self.device)
+                audio_a = audio_a.to(device=self.device)
+                audio_b = audio_b.to(device=self.device)
+
+                # Extract Embeddings
+                emb_a = self.embed_model.forward(audio_a)
+                emb_b = self.embed_model.forward(audio_b)
+                
+                emb_a = emb_a[0] if isinstance(emb_a, tuple) else emb_a
+                emb_b = emb_b[0] if isinstance(emb_b, tuple) else emb_b
+                
+                # Cosine Similarity
+                sim = F.cosine_similarity(emb_a, emb_b, dim=1)
+                
+                scores.extend(sim.cpu().numpy().tolist())
+                labels.extend(batch_labels.cpu().numpy().tolist())
+
+        eer, eer_threshold = eer_metric(scores, labels)
+        min_dcf, dcf_threshold = minDCF_metric(scores, labels)
+
+        print("Evaluation")
+        print(f"EER: {eer*100:.2f}% (at threshold: {eer_threshold:.4f})")
+        print(f"Min DCF: {min_dcf:.4f} (at threshold: {dcf_threshold:.4f})")
+
+        self.embed_model.train()
+
+        return eer, eer_threshold, min_dcf, dcf_threshold
+    

@@ -14,10 +14,11 @@ class FeatureExtractor(torch.nn.Module):
             n_fft=self.n_fft,
             hop_length=self.hop_length,
             n_mels=self.n_mels,
-        )
+        ).to("cuda")
         self.log = torchaudio.transforms.AmplitudeToDB()
 
     def get_features(self, wav):
+        wav = wav.to("cuda")
         x = self.mel(wav)
         x = self.log(x)
         x = (x - x.mean()) / (x.std() + 1e-9)

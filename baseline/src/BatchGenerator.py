@@ -106,11 +106,13 @@ class BatchGenerator(Dataset):
         batch = torch.stack(batch).to(self.device)
 
         augmented_batch = self.augment(batch.unsqueeze(1)).squeeze(1)
-
+        
+        #return batch, labels
         return augmented_batch, labels
 
     def get_evaluation_batch(self, batch_size=32, start_idx=0):
-        assert start_idx + batch_size < len(self.evaluation_pairs)
+
+        end_index = start_idx + batch_size if start_idx + batch_size < len(self.evaluation_pairs) else len(self.evaluation_pairs) - 1
 
         pairs = self.evaluation_pairs[start_idx : start_idx + batch_size]
         wavs_a, wavs_b, labels = [], [], []

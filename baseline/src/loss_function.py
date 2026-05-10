@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-# Some ideas taken from https://github.com/clovaai/voxceleb_trainer/blob/master/loss/aamsoftmax.py
+# Some minor ideas taken from https://github.com/clovaai/voxceleb_trainer/blob/master/loss/aamsoftmax.py
 
 
 class AAM_loss(nn.Module):

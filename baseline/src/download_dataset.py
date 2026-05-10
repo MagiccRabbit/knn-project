@@ -115,8 +115,9 @@ def download_dir(repo_id: str, to_download: str, target_dir: Path):
 
 def download_eval_pairs(target_dir: Path):
     output_path = target_dir.joinpath(EVAL_PAIRS_FILE)
+    print(output_path)
     
-    if output_path.exists:
+    if output_path.exists():
         print("\t Already Downloaded")
         return
 
