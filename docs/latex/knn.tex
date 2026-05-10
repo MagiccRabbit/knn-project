@@ -1,0 +1,168 @@
+\documentclass{article}
+
+% Language setting
+% Replace `english' with e.g. `spanish' to change the document language
+\usepackage[utf8]{inputenc}
+\usepackage[czech]{babel}
+\usepackage[T1]{fontenc}
+
+% Set page size and margins
+% Replace `letterpaper' with `a4paper' for UK/EU standard size
+\usepackage[letterpaper,top=2cm,bottom=2cm,left=3cm,right=3cm,marginparwidth=1.75cm]{geometry}
+
+% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[colorlinks=true, allcolors=black]{hyperref}
+\usepackage{multirow}
+
+\title{Your Paper}
+\author{You}
+
+\begin{document}
+% Center title block vertically on the page
+\thispagestyle{empty}% no page number
+\vspace*{\fill}
+\begin{center}
+    {\fontsize{100pt}{14pt}\selectfont Identifikace řečníka }\\[1em]
+    {Bc. Radek Zobaník}
+    {(xzoban02)} \\
+    {Bc. Michal Zobaník}
+    {(xzoban01)}
+\end{center}
+\vspace*{\fill}
+\hfill 10. Května 2026
+\newpage
+
+\tableofcontents
+
+\newpage
+
+\section{Úvod} 
+
+Cílem je vytvořit a naučit neuronovou síť tak, aby byla schopna identifikovat řečníka. Model pracuje s audio nahrávkou nějakého řečníka, pomocí které zakóduje jeho identitu do embedding vektoru. Tento vektor se pak použije pro identifikaci řečníka z jiné nahrávky. Pokud se bude jednat o stejného člověka, tak by to daná neuronová síť měla správně vyhodnotit pomocí malé vzdálenosti daných dvou vektorů. Pokud se nejedná o stejné osoby, tak by tyto vektory měly být značně odlišné. Model by se měl naučit vytvářet embedding vektory tak, že i přes různé nahrávky vytvoří dané osobě velmi podobné embedding vektory a a embedding vektory dvou různých mluvčích zase bude co nejvíc vzdálené od sebe (verifikace řečníka).
+
+Sekce \ref{SOTA} popisuje existující přístupy identifikace řečníka. Sekce \ref{modely} pak modely, které jsme použili. Sekce \ref{data} popisuje použitou datovou sadu a augmentaci dat. Sekce \ref{exp} popisuje experimenty, které jsme provedli a sekce \ref{kon} popisuje výsledky těchto experimentů.
+
+
+\section{Inspirace/SOTA} \label{SOTA}
+
+Modely pro identifikaci řečníka se dnes dělí na dvě skupiny.
+Nejprve modely založené většinou na TDNN (Time delay neural network) architekturách, jako je 
+ECAPA-TDNN \cite{ECAPA}, které jsou přímo specializované na tuto úlohu. Druhou skupinu tvoří self-supervised modely, které se samostatně trénují na velmém množství zvukových nahrávek. Tyto modely se pak dotrénovávají na specifické úlohy. Příkladem tohoto modelu je například WavML \cite{WavLM}. Případně se tyto způsoby kombinují, kdy se přidá nějaká hlava k self-supervised modelu.
+
+\section{Modely} \label{modely}
+
+Tato sekce popisuje, jaké modely jsme použili. Sekce \ref{base} popisuje námi zvolené jednoduché řešení a sekce \ref{main} zase naše konečná řešení.
+
+\subsection{Baseline řešení} \label{base}
+
+Jako baseline řešení jsme zvolili poměrně jednoduchou konvoluční síť. Skládá se ze 4 bloků jdoucích za sebou. Každý blok obsahuje konvoluční vrstvu, batch normalizaci a ReLU, Výstup každého bloku je navíc pomocí reziduálního spojení sečten s jeho vstupem, což usnadňuje trénování hlubší sítě a zlepšuje stabilitu učení. Model je zakončen statistics poolingem. Při trénování se model snaží přiřadit jednotlivé nahrávky ke správnému mluvčímu a zároveň toho mluvčího reprezentovat určitým embeddingem. Jako ztrátová funkce byla zvolena křížová entropie.
+
+
+\subsection{Hlavní model} \label{main}
+
+Jako hlavní model jsme si zvolili ECAPA-TDNN. Jedná se o neuronovou síť určenou pro rozpoznávání a ověřování mluvčího z hlasového záznamu. Vychází z TDNN modelu, ke kterému přidává attention mechanismy a efektivnější propojení mezi vrstvami (více viz \cite{ECAPA}).
+
+Vstupem jsou normalizované log mel spektrogramy o 80 kanálech. 
+
+WavLM je self-supervised obecný model určený pro zpracování řeči a audia. Tento model byl trénován na více než $94\,000$ hodinách řeči, což z něj dělá ideálního kandidáta jako náš hlavní model (více viz\cite{WavLM}). 
+
+Vstupem jsou raw \textit{.wav} soubory a výstupem je 768 dimenzionální vektor reprezentující vstupní nahrávku.
+
+\section{Datová sada} \label{data}
+
+Jako datovou sadu jsme si zvolili VoxCeleb \cite{Nagrani17VoxCeleb}. Jedná se o sbírku audio nahrávek získaných z rozhovorů s celebritami. Obsahuje nahrávky 1\,251 lidí. Průměrná délka nahrávky je 8 s. Každý řečník je v průměru zastoupen ve 100 až 200 nahrávkách. Datová sada obsahuje celkem 152\,000 nahrávek, tedy něco přes 2\,500 hodin záznamu. Nahrávky obsahují rušivé elementy v podobě konverzací na pozadí, smíchu a různých akustických podmínek. Datová sada je rozdělena na trénovací a evaluační část. Toto rozdělení ukazuje tabulka \ref{split_stats}. Stejné rozdělení bylo použito i v našem projektu.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+          & Počet řečníků & Počet nahrávek \\ \hline
+Trénování & 1\,211        & 148\,642        \\ \hline
+Evaluace  & 40            & 4\,874          \\ \hline
+Celkem    & 1\,251        & 153\,516        \\ \hline
+\end{tabular}
+\caption{Rozdělení datové sady}
+\label{split_stats}
+\end{table}
+
+Pro lepší robustnost modelů jsme provedli augmentaci trénovací datové sady. Každá trénovací nahrávka měla s pravděpodobností $p$ šanci, že bude aplikována jedna nebo více augmentací z následujícího výběru v následujícím pořadí:
+\begin{itemize}
+    \item Přidání ozvěny simulující různé akustické podmínky pomocí konvoluce s nahrávkami z datasetu SLR28 obsahujícího RIR záznamy \cite{rir} ($p=0.4$)
+    \item Přidání rušivých zvuků v pozadí z datasetu MUSAN \cite{snyder2015musanmusicspeechnoise} ($p=0.5$)
+    \item Změna výšky hlasu o $-4$ až $4$ půltóny pro simulaci rozdílného hlasového traktu ($p=0.2$)
+    \item Změna hlasitosti nahrávky pro simulaci různé vzdálenosti od mikrofonu ($p=0.3$)
+    \item Inverze polarity signálu ($p=0.5$)
+\end{itemize}
+
+\section{Experimenty} \label{exp}
+
+\subsection{Prostředí na evaluaci}
+Model byl evaluován na dvojicích nahrávek náležejících 40 řečníkům z evaluační části datasetu, kteří nebyli využiti během trénování. K výběru párů byl použit oficiální evaluační protokol datasetu VoxCeleb 1 definovaný v souboru \texttt{veri\_test2.txt} (dostupném na stránce VoxCeleb 1 \footnote{\href{https://www.robots.ox.ac.uk/~vgg/data/voxceleb/}{https://www.robots.ox.ac.uk/\textasciitilde vgg/data/voxceleb/}}), který specifikuje verifikační dvojice pro hodnocení úlohy ověřování identity řečníka. Soubor obsahuje celkem $37\,612$ dvojic, z nichž přibližně polovinu tvoří nahrávky od stejného řečníka (pozitivní páry). Každý ze 40 řečníků figuruje přibližně  v $2\,000$ párech a každá nahrávka je v průměru použita $16$krát. Pro určení míry shody mezi dvěma embeddingy potom byla využita kosinová vzdálenost.
+
+Pro vyhodnocení modelu jsme zvolili dvě standardní metriky. První je Equal Error Rate (EER), která udává hodnotu chybovosti v bodě, v němž se rovnají míry falešného přijetí (False Acceptance Rate) a falešného odmítnutí (False Rejection Rate). Druhou použitou metrikou je Detection Cost Function (minDCF). Tato metrika je sice podobná EER, ale umožňuje zohlednit rozdílné váhy jednotlivých typů chyb, což lépe reflektuje reálné požadavky, kdy falešné přijetí a falešné odmítnutí nemusí mít stejnou prioritu. V našem nastavení však mají obě chyby váhu 1. V obou případech je cílem minimalizovat výsledné hodnoty, přičemž obě metriky poskytují hodnocení výkonnosti modelu nezávislé na konkrétně zvoleném rozhodovacím prahu.
+
+\subsection{Popis experimentů}
+
+Již ze začátku jsme zjistili, že jsme zvolili příliš malý model pro náš baseline, který obsahoval jen 3 vrstvy a poloviční počet kanálů. Toto nastavení ale nedokázalo správně pochopit danou úlohu a výsledek se rovnal téměř náhodnému odhadu. Proto jsme zvětšili model o jednu konvoluční vrstvu a zdvojnásobili počet kanálu na 512.
+
+Pro hlavní model jsme se nejprve pokusili finetune na již předtrénovaný model WavVM. Nepodařilo se nám však dosáhnout kvalitních výsledků (nepodařilo se nám model nastavit/dotrénovat tak, aby konvergoval v naší úloze) a proto jsme přistoupili na změnu. Našim "hlavním" modelem se stal model ECAPA, již zmíněn víše. Použili jsme implementaci z github repozitáře \footnote{\href{https://github.com/lawlict/ECAPA-TDNN}{https://github.com/lawlict/ECAPA-TDNN}}, která až na malé rozdíly plně implementuje původní ECAPA model \cite{ECAPA}. 
+Prvotně zmíněná cross-entropie se již na baseline modelu projevila jako nedostatečná. Nahradili jsme ji AAM-softmax loss (Aditive Angular Margin Softmax loss), která je vhodná na problémy, kdy se snažíme minimalizovat rozdíl embedding vektorů stejného mluvčího a maximalizovat rozdíl embedding vektorů odlišných mluvčích.
+
+Pomocí prvotních experimentů jsme stanovili hyperparametry modelu. Pro AAM-softmax loss se jedná o \textit{$scale = 30$} a \textit{margin = 0.2}, následně \textit{$lr=1e-3$} a \textit{$weight\_decay=1e-2$} pro trénování ECAPA parametrů.   
+
+Nejprve nás zajímalo, jaký vliv má augmentace dat na kvalitu výsledného modelu. Vytrénovali jsme model přímo na VoxCeleb 1 datové sadě až do konvergence. Poté jsme udělali to samé, jen jsme trénovali pomocí augmentovaných dat. 
+
+Nechtělo se nám úplně zahazovat WavVM model a tak jsme provedli další experiment. Použili jsme tento předtrénovaný model jako  extraktor přiznaků, a jeho výstup jsme pak přidali na vstup ECAPA modelu. Zkoumali jsme, jestli WavVM model dokáže nahradit mel spektrogramy a jestli nedokážeme získat lepší výsledek, když je WavVM předučený k tomu, aby dobře pracoval se zvukovými nahrávkami.
+
+Chtěli jsme dostat lepší výsledky, a tak jsme prováděli experimenty s úpravou ECAPA modelu. Provedli jsme několik změn s architekturou ECAPA modelu. Například přidání dalšího reziduálního bloku nepřineslo žádné zlepšení, jen delší dobu trénování. Několika testy jsme nakonec nalezli nejlepší řešení. Oproti standardnímu modelu jsme zdvojnásobili počet kanálů na 1024, přidali dropout a odstranili batch normalizaci těsně před výstupem, kterou jsme nahradili pouhým přidáním identity.
+
+\section{Výsledky} \label{kon}
+
+Nejprve vliv augmentace na výsledný model. Z výsledků vyplývá, že augmentace  má pozitivní vliv na celkový výsledek a to až v řádu několika procent hlavně u metriky EER. Jak jde vidět z tabulky \ref{augment_results} 
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+Typ modelu                   & EER  & minDCF \\ \hline
+ECAPA (bez augmentace) & $9.5$  & $0.6167$ \\ \hline
+ECAPA (s augmentací)   & $8.98$ & $0.7178$ \\ \hline
+WavML + ECAPA (bez augmentace) & $15.30$ & $0.9558$ \\ \hline
+WavML + ECAPA (s augmentací) & $11.46$ & $0.8964$ \\ \hline
+\end{tabular}
+\caption{Porovnání modelů s a bez použití augmentace}
+\label{augment_results}
+\end{table}
+
+Z dané tabulky lze také vyčíst, že WavML + ECAPA model dosahuje nějakých zajímavých výsledků, ale výsledek je pořád horší, než ECAPA. Důvodem je nespíš to, že architektura ECAPA modelu je více přizpůsobená log mel spektrogramu. Pro zlepšení výsledků by bylo pravděpodobně nutné přidat nějaký blok navíc mezi WavML výstup a ECAPA vstup, který by lépe zpracoval WavML výstup. Vyzkoušeli jsme dva krátké experimenty s lineárními, respektive konvolučními bloky, ale to nepřineslo žádné zlepšení (spíše zhoršení).
+
+V tabulce \ref{model_results} lze vidět výsledky jednotlivých modelů s jejich nejlepším nastavením. Jde vidět, že WavML + ECAPA je lepší než náš baseline model. Při přihlédnutí na dobu trénování obou modelů se však jejich rozdíl nejeví nijak velký. Baseline model dosáhl oproti WavML + ECAPA konvergence za méně než desetinu času.
+
+Nejlepším modelem se tak stává vylepšená ECAPA, která dosahuje nejlepší hodnoty parametru EER. Zvětšení kanálů pravděpodobně pomohlo s učením vícero informací. Dropout zase pomohl s tím, aby model neuvízl v lokálním minimu. Zrušení batch normalizace před výstupem zase pravděpodobně zlepšilo embedding space.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|l|l|l|}
+\hline
+Typ modelu          & EER   & minDCF \\ \hline
+Baseline            & 17,6  & 0,8542 \\ \hline
+ECAPA               & 8,98  & 0.7178 \\ \hline
+WavML + ECAPA & 11,46 & 0,8964 \\ \hline
+ECAPA vylepšená     & 5.69  & 0,4167 \\ \hline
+\end{tabular}
+\caption{Porovnání výsledků všech modelů}
+\label{model_results}
+\end{table}
+
+Při trénování jsme měli také menší problémy s evaluační metrikou minDCF. Dost často se stávalo (a například u porovnání Baseline a WavML + ECAPA to jde dobře vidět), že model se zlepšuje v EER metrice, ale minDCF hodnota skáče skoro náhodně. Přesto ale obvykle platí, že lepší model v EER byl lepší i v minDCF.
+
+\section{Závěr}
+Sice se nám nepodařilo dostat se na SOTA výsledek, ale dokázali jsme se dostat až k 5.69\% EER. Oproti tomu druhá metrika se v našem případě chovala velmi nepředvídatelně a hlavně v průběhu trénování poměrně dost skákala. Přesto se nám povedlo natrénovat poměrně výkonný model, který dokáže identifikovat nahrávky od stejného řečníka a zároveň odlišit ty odlišné.
+
+\newpage
+\bibliographystyle{plain}
+\bibliography{sample}
+
+\end{document}
